@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NWS Watches & Warnings - Color Coded</title>
+<style>
+:root{
+  --bg:#0b0b0b;
+  --panel:#111;
+  --muted-opacity:0.28;
+  --icon-size-inactive:50px;
+  --icon-size-active:70px;
+  --subicon-size:40px;
+  --glow-color:orange;
+  --color-winter:#66ccff;
+  --color-fire:#ff6600;
+  --color-severe:#ffcc00;
+  --color-marine:#00bfff;
+  --color-flood:#00ffcc;
+  --color-heat:#ffcc66;
+  --color-tropical:#ff3399;
+}
+body{margin:0;background:var(--bg);color:#fff;font-family:Inter, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial;}
+.wrap{max-width:1200px;margin:0 auto;padding:12px;}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+input#zip{width:96px;padding:6px;border-radius:6px;border:1px solid #222;background:#0c0c0c;color:#fff}
+button{background:orange;color:#000;border:none;padding:6px 10px;border-radius:6px;font-weight:700;cursor:pointer}
+
+/* banners */
+.banner{background:var(--panel);border-radius:8px;padding:6px 8px;margin:6px 0;display:flex;flex-direction:column;gap:4px;}
+.banner-title{font-size:0.72rem;letter-spacing:1px;color:#aaa;margin-bottom:4px;text-transform:uppercase}
+.banner-row{display:flex;align-items:flex-start;justify-content:space-around;gap:12px;flex-wrap:nowrap;overflow-x:auto;padding:2px 0}
+.icon-wrap{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;width:90px;flex:0 0 auto;transition:all 0.2s;}
+.icon-holder{position:relative;width:var(--icon-size-inactive);height:var(--icon-size-inactive);display:flex;align-items:center;justify-content:center;opacity:var(--muted-opacity);transition:all 0.2s;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.6));border-radius:6px;}
+.icon-holder.active{opacity:1;width:var(--icon-size-active);height:var(--icon-size-active);box-shadow:0 0 12px var(--glow-color);}
+.sub-icons{display:flex;gap:4px;margin-top:4px;transition:all 0.2s;flex-wrap:wrap;}
+.sub-icons .icon-holder{width:var(--subicon-size);height:var(--subicon-size);opacity:1;box-shadow:0 0 6px var(--glow-color);}
+.icon-label{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:0.65rem;color:#aaa;text-align:center;pointer-events:none;white-space:nowrap;}
+#radarContainer{margin:10px 0;border-radius:8px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,0.6);}
+iframe#windyRadar{width:100%;height:420px;border:0;display:block;}
+#alerts{margin-top:12px;}
+.alert-card{background:#111;padding:10px;border-radius:8px;margin-bottom:10px;border-left:6px solid orange;}
+.alert-card.watch{border-left-color:#00bfff;}
+.alert-card.warning{border-left-color:#ff4500;}
+.alert-card.advisory{border-left-color:#ffff66;color:#ddd;}
+.meta{font-size:0.85rem;color:#aaa;}
+.small{font-size:0.82rem;color:#aaa;}
+html{scroll-behavior:smooth;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⚠️ NWS Watches & Warnings</h1>
+    <input id="zip" placeholder="ZIP" value="76088">
+    <button id="btnLoad">Load</button>
+  </header>
+
+  <!-- Watches Banner -->
+  <div class="banner" id="watchBanner">
+    <div class="banner-title">Watches</div>
+    <div class="banner-row" id="watchRow"></div>
+  </div>
+
+  <!-- Warnings Banner -->
+  <div class="banner" id="warningBanner">
+    <div class="banner-title">Warnings</div>
+    <div class="banner-row" id="warningRow"></div>
+  </div>
+
+  <!-- Radar -->
+  <div id="radarContainer"><iframe id="windyRadar" src="" title="Live Radar from Windy.com"></iframe></div>
+
+  <!-- Alerts list -->
+  <section id="alerts"><p class="small">Loading alerts…</p></section>
+  <p id="lastUpdated" class="small"></p>
+</div>
+
+<script>
+const CATEGORIES=[
+  {key:'winter',label:'Winter Weather/Cold Weather',types:['winter storm watch','blizzard warning','winter storm warning','ice storm warning','winter weather advisory','snow squall warning','freeze watch','freeze warning','frost advisory','cold weather advisory','extreme cold warning'],color:'var(--color-winter)'},
+  {key:'fire',label:'Fire Weather',types:['fire weather watch','red flag warning'],color:'var(--color-fire)'},
+  {key:'severe',label:'Fog / Wind /Severe Weather',types:['dense fog advisory','high wind watch','high wind warning','wind advisory','severe thunderstorm watch','severe thunderstorm warning','tornado watch','tornado warning','extreme wind warning'],color:'var(--color-severe)'},
+  {key:'marine',label:'Marine',types:['small craft advisory','gale warning','storm warning','hurricane force wind warning','special marine warning'],color:'var(--color-marine)'},
+  {key:'flood',label:'Flooding',types:['coastal flood watch','coastal flood warning','coastal flood advisory','flood watch','flash flood warning','flood warning','river flood watch','river flood warning'],color:'var(--color-flood)'},
+  {key:'heat',label:'Excessive Heat',types:['excessive heat watch','excessive heat warning','heat advisory'],color:'var(--color-heat)'},
+  {key:'tropical',label:'Tropical',types:['tropical storm watch','tropical storm warning','hurricane watch','hurricane warning','storm surge watch','storm surge warning'],color:'var(--color-tropical)'}
+];
+
+const TYPE_ICON={
+  'winter storm watch':'snow','blizzard warning':'snow','winter storm warning':'snow','ice storm warning':'snow','winter weather advisory':'snow','snow squall warning':'snow',
+  'freeze watch':'snow','freeze warning':'snow','frost advisory':'snow','cold weather advisory':'snow','extreme cold warning':'snow',
+  'fire weather watch':'fire','red flag warning':'fire',
+  'dense fog advisory':'fog',
+  'high wind watch':'wind','high wind warning':'wind','wind advisory':'wind',
+  'severe thunderstorm watch':'thunderstorm','severe thunderstorm warning':'thunderstorm',
+  'tornado watch':'tornado','tornado warning':'tornado','extreme wind warning':'wind',
+  'small craft advisory':'marine','gale warning':'marine','storm warning':'marine','hurricane force wind warning':'marine','special marine warning':'marine',
+  'coastal flood watch':'flood','coastal flood warning':'flood','coastal flood advisory':'flood','flood watch':'flood','flash flood warning':'flood','flood warning':'flood','river flood watch':'flood','river flood warning':'flood',
+  'excessive heat watch':'heat','excessive heat warning':'heat','heat advisory':'heat',
+  'tropical storm watch':'tropical','tropical storm warning':'tropical','hurricane watch':'tropical','hurricane warning':'tropical','storm surge watch':'tropical','storm surge warning':'tropical'
+};
+
+function idForType(type){return type.replace(/[^a-z0-9]+/gi,'-').toLowerCase();}
+function capitalize(s){return s.replace(/\b\w/g,c=>c.toUpperCase());}
+
+function makeIconSVG(iconKey,color='lightgray'){
+  switch(iconKey){
+    case 'thunderstorm': return `<svg viewBox="0 0 64 64"><ellipse cx="32" cy="26" rx="16" ry="9" fill="lightgray"/><polygon points="28,34 34,34 30,46 36,46 26,60 30,48 24,48" fill="${color}"/></svg>`;
+    case 'tornado': return `<svg viewBox="0 0 64 64"><path d="M20 12 L44 12 L32 52 Z" fill="${color}"/></svg>`;
+    case 'flood': return `<svg viewBox="0 0 64 64"><path d="M8,46 Q18,40 28,46 T56,46" stroke="${color}" stroke-width="3" fill="none"/><path d="M14,52 Q24,46 36,52 T54,52" stroke="${color}" stroke-width="2" fill="none"/></svg>`;
+    case 'snow': return `<svg viewBox="0 0 64 64"><text x="12" y="42" font-size="32" fill="${color}">❄️</text></svg>`;
+    case 'fire': return `<svg viewBox="0 0 64 64"><path d="M32 12 C28 22 36 28 32 36 C40 32 44 42 32 52 C24 42 28 36 24 32 C20 28 36 16 32 12 Z" fill="${color}"/></svg>`;
+    case 'wind': return `<svg viewBox="0 0 64 64"><path d="M12 30 Q24 26 36 30 T60 30" stroke="${color}" stroke-width="3" fill="none"/></svg>`;
+    case 'marine': return `<svg viewBox="0 0 64 64"><path d="M10 40 Q30 30 54 40" stroke="${color}" stroke-width="3" fill="none"/></svg>`;
+    case 'heat': return `<svg viewBox="0 0 64 64"><circle cx="32" cy="24" r="10" fill="${color}"/></svg>`;
+    case 'fog': return `<svg viewBox="0 0 64 64"><rect x="12" y="28" width="40" height="6" rx="3" fill="${color}" /></svg>`;
+    case 'tropical': return `<svg viewBox="0 0 64 64"><path d="M32 12 A12 12 0 1 0 44 24" fill="none" stroke="${color}" stroke-width="3"/></svg>`;
+    default: return `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#333"/><text x="32" y="38" text-anchor="middle" font-size="12" fill="#888">?</text></svg>`;
+  }
+}
+
+function buildCategoryBanners(){
+  const watchRow=document.getElementById('watchRow');
+  const warnRow=document.getElementById('warningRow');
+  watchRow.innerHTML=''; warnRow.innerHTML='';
+  CATEGORIES.forEach(cat=>{
+    ['watch','warning'].forEach(type=>{
+      const wrap=document.createElement('div'); wrap.className='icon-wrap';
+      wrap.innerHTML=`
+        <div class="icon-holder" id="cat-${cat.key}-${type}" title="${cat.label}">
+          ${makeIconSVG(cat.key,'#555')}
+        </div>
+        <div class="icon-label">${cat.label}</div>
+        <div class="sub-icons" id="sub-cat-${cat.key}-${type}"></div>
+      `;
+      (type==='watch'?watchRow:warnRow).appendChild(wrap);
+    });
+  });
+}
+
+let currentLat=null, currentLon=null;
+let previousIds=new Set();
+
+function updateRadar(lat,lon,overlay='radar'){
+  document.getElementById('windyRadar').src=`https://embed.windy.com/embed2.html?lat=${lat}&lon=${lon}&zoom=7&level=surface&overlay=${overlay}&menu=&message=true&marker=true`;
+}
+
+async function init(){
+  buildCategoryBanners();
+  document.getElementById('btnLoad').addEventListener('click',manualLoad);
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(async pos=>{
+      currentLat=pos.coords.latitude; currentLon=pos.coords.longitude;
+      updateRadar(currentLat,currentLon,'radar');
+      await fetchAlerts();
+    },manualLoad,{timeout:8000});
+  } else manualLoad();
+}
+
+async function manualLoad(){
+  const zip=document.getElementById('zip').value.trim();
+  if(!zip) return;
+  try{
+    const res=await fetch(`https://api.zippopotam.us/us/${zip}`);
+    if(!res.ok) throw new Error();
+    const data=await res.json();
+    currentLat=data.places[0].latitude; currentLon=data.places[0].longitude;
+    updateRadar(currentLat,currentLon,'radar');
+    await fetchAlerts();
+  }catch(e){alert('Invalid ZIP or network error');}
+}
+
+async function fetchAlerts(){
+  const alertsContainer=document.getElementById('alerts');
+  const lastUpdated=document.getElementById('lastUpdated');
+  try{
+    const res=await fetch(`https://api.weather.gov/alerts/active?point=${currentLat},${currentLon}`);
+    if(!res.ok) throw new Error();
+    const data=await res.json();
+    const features=Array.isArray(data.features)?data.features:[];
+    alertsContainer.innerHTML='';
+    const newIds=new Set();
+    const categoryMap={};
+    CATEGORIES.forEach(cat=>categoryMap[cat.key]={watch:[],warning:[]});
+    features.forEach(f=>{
+      const p=f.properties;
+      const ev=p.event.toLowerCase();
+      const type=ev.includes('watch')?'watch':ev.includes('warning')?'warning':'advisory';
+      const catKey=CATEGORIES.find(c=>c.types.some(t=>ev.includes(t)))?.key;
+      if(catKey && type!=='advisory') categoryMap[catKey][type].push(ev);
+      const card=document.createElement('div'); card.className='alert-card'; card.id=idForType(ev);
+      if(type==='watch') card.classList.add('watch'); else if(type==='warning') card.classList.add('warning'); else card.classList.add('advisory');
+      card.innerHTML=`<h3 style="margin:0 0 6px">${capitalize(p.event)}</h3><div class="meta">${p.headline||''}</div><div style="margin-top:6px">${(p.description||'').replace(/\n/g,'<br>')}</div><div class="small" style="margin-top:6px"><strong>Effective:</strong> ${p.effective?new Date(p.effective).toLocaleString():'N/A'} <strong>Expires:</strong> ${p.expires?new Date(p.expires).toLocaleString():'N/A'}</div>`;
+      alertsContainer.appendChild(card);
+      newIds.add(f.id);
+    });
+    // update banners with colors
+    CATEGORIES.forEach(cat=>{
+      ['watch','warning'].forEach(type=>{
+        const holder=document.getElementById(`cat-${cat.key}-${type}`);
+        const subContainer=document.getElementById(`sub-cat-${cat.key}-${type}`);
+        const actives=categoryMap[cat.key][type];
+        if(actives.length>0){
+          holder.classList.add('active'); subContainer.innerHTML='';
+          actives.forEach(a=>{
+            const sub=document.createElement('div'); sub.className='icon-holder';
+            sub.innerHTML=makeIconSVG(TYPE_ICON[a]||cat.key,cat.color);
+            sub.onclick=()=>document.getElementById(idForType(a))?.scrollIntoView({behavior:'smooth'});
+            subContainer.appendChild(sub);
+          });
+        } else {
+          holder.classList.remove('active'); subContainer.innerHTML='';
+          holder.innerHTML=makeIconSVG(cat.key,'#555')+'<div class="icon-label">'+cat.label+'</div><div class="sub-icons" id="sub-cat-'+cat.key+'-'+type+'"></div>';
+        }
+      });
+    });
+    lastUpdated.textContent='Last Updated: '+new Date().toLocaleTimeString();
+    if([...newIds].some(id=>!previousIds.has(id))){
+      const ctx=new AudioContext();
+      const o=ctx.createOscillator();
+      const g=ctx.createGain();
+      o.type='square'; o.frequency.setValueAtTime(1000,ctx.currentTime);
+      g.gain.setValueAtTime(0.15,ctx.currentTime);
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime+0.8);
+    }
+    previousIds=newIds;
+  }catch(e){console.error(e);alertsContainer.innerHTML='<p class="small">No active alerts found.</p>';}
+}
+
+setInterval(()=>{if(currentLat && currentLon) fetchAlerts();},60000);
+
+init();
+</script>
+</body>
+</html>
